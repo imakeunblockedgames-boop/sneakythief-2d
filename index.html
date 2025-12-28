@@ -1,0 +1,625 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Sneaky Neighbor – 106 Levels</title>
+<style>
+  html,body{margin:0;height:100%;background:#0c0f16;overflow:hidden;font-family:system-ui}
+  canvas{position:fixed;inset:0;width:100vw;height:100vh}
+  #hud{
+    position:fixed;left:12px;top:12px;z-index:10;
+    color:#fff;background:rgba(0,0,0,.55);
+    border:1px solid rgba(255,255,255,.14);
+    padding:10px 12px;border-radius:12px;
+    font-size:14px;line-height:1.25;min-width:260px;max-width:560px
+  }
+  #btns{position:fixed;right:12px;top:12px;z-index:11;display:flex;gap:10px;flex-wrap:wrap}
+  button{
+    background:#111;color:#fff;border:1px solid rgba(255,255,255,.18);
+    padding:10px 12px;border-radius:12px;cursor:pointer
+  }
+  button:hover{background:#1a1a1a}
+  .small{opacity:.85;font-size:12px;margin-top:6px}
+  .warn{color:#ffd2d2}
+</style>
+</head>
+<body>
+<div id="hud">
+  <div><b>Level:</b> <span id="lvl">1</span>/<span id="lvlMax">106</span> • <b>Keys:</b> <span id="keys">0</span>/<span id="need">0</span></div>
+  <div><b>Status:</b> <span id="status">Explore</span></div>
+  <div class="small">Move <b>WASD</b> • Run <b>Shift</b> • Sneak <b>Ctrl</b> • Restart <b>R</b></div>
+  <div class="small warn" id="msg"></div>
+</div>
+
+<div id="btns">
+  <button id="restart">Restart</button>
+  <button id="skip">Skip Level</button>
+  <button id="jump10">+10</button>
+</div>
+
+<canvas id="c"></canvas>
+
+<script>
+(() => {
+  const c = document.getElementById("c");
+  const ctx = c.getContext("2d", { alpha:false });
+
+  const lvlEl = document.getElementById("lvl");
+  const lvlMaxEl = document.getElementById("lvlMax");
+  const keysEl = document.getElementById("keys");
+  const needEl = document.getElementById("need");
+  const statusEl = document.getElementById("status");
+  const msgEl = document.getElementById("msg");
+  const restartBtn = document.getElementById("restart");
+  const skipBtn = document.getElementById("skip");
+  const jump10Btn = document.getElementById("jump10");
+
+  function resize(){
+    const dpr = Math.max(1, Math.min(2, devicePixelRatio || 1));
+    c.width = Math.floor(innerWidth * dpr);
+    c.height = Math.floor(innerHeight * dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  addEventListener("resize", resize);
+  resize();
+
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  const dist=(ax,ay,bx,by)=>Math.hypot(ax-bx, ay-by);
+  const lerp=(a,b,t)=>a+(b-a)*t;
+  const angNorm=(a)=>{ while(a>Math.PI)a-=Math.PI*2; while(a<-Math.PI)a+=Math.PI*2; return a; };
+
+  // ---------------- Collision ----------------
+  function resolveCircleRect(p, r, rect){
+    const nx = clamp(p.x, rect.x, rect.x+rect.w);
+    const ny = clamp(p.y, rect.y, rect.y+rect.h);
+    let dx = p.x - nx, dy = p.y - ny;
+    const d2 = dx*dx + dy*dy;
+
+    if(d2 === 0){
+      const left = Math.abs(p.x - rect.x);
+      const right = Math.abs((rect.x+rect.w) - p.x);
+      const top = Math.abs(p.y - rect.y);
+      const bottom = Math.abs((rect.y+rect.h) - p.y);
+      const m = Math.min(left,right,top,bottom);
+      if(m === left) p.x = rect.x - r - 0.5;
+      else if(m === right) p.x = rect.x+rect.w + r + 0.5;
+      else if(m === top) p.y = rect.y - r - 0.5;
+      else p.y = rect.y+rect.h + r + 0.5;
+      return;
+    }
+
+    if(d2 < r*r){
+      const d = Math.sqrt(d2);
+      const push = (r - d) + 0.7;
+      p.x += (dx/d) * push;
+      p.y += (dy/d) * push;
+    }
+  }
+
+  function makeOuterWalls(W,H,th=20){
+    return [
+      {x:80,y:80,w:W-160,h:th},
+      {x:80,y:H-80-th,w:W-160,h:th},
+      {x:80,y:80+th,w:th,h:H-160-th},
+      {x:W-80-th,y:80+th,w:th,h:H-160-th},
+    ];
+  }
+
+  // ---------------- Handcrafted early levels (same idea as before) ----------------
+  function stage1(){
+    const W=1600,H=1000;
+    return {
+      name:"Open Warm-up", W,H,
+      walls:[...makeOuterWalls(W,H,20),
+        {x:400,y:300,w:220,h:80},{x:900,y:250,w:260,h:90},{x:500,y:650,w:300,h:90},{x:1050,y:700,w:260,h:80}
+      ],
+      keys:[{x:200,y:200,t:false},{x:1400,y:200,t:false},{x:1400,y:850,t:false}],
+      spawn:{x:300,y:800},
+      neighbors:[]
+    };
+  }
+  function stage2(){
+    const W=1600,H=1000;
+    return {
+      name:"First Hunt", W,H,
+      walls:[...makeOuterWalls(W,H,20),
+        {x:260,y:240,w:360,h:70},{x:980,y:240,w:360,h:70},{x:560,y:470,w:480,h:70},{x:300,y:730,w:320,h:70},{x:1100,y:730,w:260,h:70}
+      ],
+      keys:[{x:180,y:160,t:false},{x:1420,y:160,t:false},{x:1420,y:850,t:false},{x:180,y:850,t:false}],
+      spawn:{x:300,y:800},
+      neighbors:[{
+        x:800,y:170,r:18,a:Math.PI/2,
+        fov:70*Math.PI/180, viewDist:210,
+        spPatrol:85, spChase:120,
+        pts:[{x:800,y:170},{x:1250,y:500},{x:350,y:500},{x:800,y:830}],
+        idx:0, state:"patrol", timer:0
+      }]
+    };
+  }
+  function stage3(){
+    const W=1600,H=1000;
+    return {
+      name:"Wide Eyes", W,H,
+      walls:[...makeOuterWalls(W,H,20),
+        {x:220,y:190,w:420,h:70},{x:980,y:190,w:420,h:70},{x:540,y:330,w:520,h:70},
+        {x:220,y:520,w:420,h:70},{x:980,y:520,w:420,h:70},{x:540,y:660,w:520,h:70}
+      ],
+      keys:[{x:180,y:160,t:false},{x:1420,y:160,t:false},{x:800,y:850,t:false},{x:180,y:850,t:false},{x:1420,y:850,t:false}],
+      spawn:{x:300,y:800},
+      neighbors:[{
+        x:800,y:170,r:18,a:0,
+        fov:85*Math.PI/180, viewDist:260,
+        spPatrol:95, spChase:145,
+        pts:[{x:800,y:170},{x:1400,y:500},{x:800,y:830},{x:200,y:500}],
+        idx:0, state:"patrol", timer:0
+      }]
+    };
+  }
+  function stage4(){
+    const W=1600,H=1000;
+    return {
+      name:"Two Watchers", W,H,
+      walls:[...makeOuterWalls(W,H,20),
+        {x:320,y:240,w:260,h:90},{x:650,y:240,w:300,h:90},{x:1020,y:240,w:260,h:90},
+        {x:320,y:470,w:960,h:70},
+        {x:320,y:680,w:260,h:90},{x:650,y:680,w:300,h:90},{x:1020,y:680,w:260,h:90}
+      ],
+      keys:[{x:180,y:160,t:false},{x:1420,y:160,t:false},{x:800,y:160,t:false},{x:180,y:850,t:false},{x:1420,y:850,t:false}],
+      spawn:{x:800,y:850},
+      neighbors:[
+        {x:450,y:500,r:18,a:0,fov:80*Math.PI/180,viewDist:235,spPatrol:95,spChase:145,pts:[{x:450,y:500},{x:450,y:820},{x:450,y:180}],idx:0,state:"patrol",timer:0},
+        {x:1150,y:500,r:18,a:Math.PI,fov:80*Math.PI/180,viewDist:235,spPatrol:95,spChase:145,pts:[{x:1150,y:500},{x:1150,y:180},{x:1150,y:820}],idx:0,state:"patrol",timer:0},
+      ]
+    };
+  }
+  function stage5(){
+    const W=1600,H=1000;
+    return {
+      name:"The Lanes", W,H,
+      walls:[...makeOuterWalls(W,H,20),
+        {x:220,y:180,w:1160,h:35},{x:220,y:300,w:1160,h:35},{x:220,y:420,w:1160,h:35},
+        {x:220,y:540,w:1160,h:35},{x:220,y:660,w:1160,h:35},{x:220,y:780,w:1160,h:35},
+        {x:460,y:215,w:35,h:565},{x:780,y:215,w:35,h:565},{x:1100,y:215,w:35,h:565}
+      ],
+      keys:[{x:180,y:160,t:false},{x:1420,y:160,t:false},{x:180,y:850,t:false},{x:1420,y:850,t:false},{x:800,y:850,t:false},{x:800,y:160,t:false}],
+      spawn:{x:300,y:850},
+      neighbors:[{x:800,y:500,r:18,a:0,fov:90*Math.PI/180,viewDist:275,spPatrol:110,spChase:165,pts:[{x:800,y:500},{x:800,y:180},{x:800,y:820}],idx:0,state:"patrol",timer:0}]
+    };
+  }
+  function stage6(){
+    const W=1600,H=1000;
+    return {
+      name:"Final House", W,H,
+      walls:[...makeOuterWalls(W,H,20),
+        {x:300,y:180,w:1000,h:60},{x:300,y:320,w:420,h:60},{x:880,y:320,w:420,h:60},
+        {x:520,y:460,w:560,h:60},{x:300,y:600,w:420,h:60},{x:880,y:600,w:420,h:60},{x:300,y:740,w:1000,h:60},
+        {x:760,y:240,w:60,h:520},{x:520,y:380,w:60,h:280},{x:1020,y:380,w:60,h:280}
+      ],
+      keys:[{x:180,y:160,t:false},{x:1420,y:160,t:false},{x:800,y:160,t:false},{x:180,y:850,t:false},{x:1420,y:850,t:false},{x:800,y:850,t:false},{x:800,y:500,t:false}],
+      spawn:{x:300,y:500},
+      neighbors:[
+        {x:450,y:500,r:18,a:0,fov:95*Math.PI/180,viewDist:300,spPatrol:120,spChase:185,pts:[{x:450,y:200},{x:450,y:800},{x:800,y:500}],idx:0,state:"patrol",timer:0},
+        {x:1150,y:500,r:18,a:Math.PI,fov:95*Math.PI/180,viewDist:300,spPatrol:120,spChase:185,pts:[{x:1150,y:800},{x:1150,y:200},{x:800,y:500}],idx:0,state:"patrol",timer:0}
+      ]
+    };
+  }
+
+  // ---------------- Procedural generator: creates level N (1-based overall) ----------------
+  // We generate 100 more levels: overall levels 7..106
+  function rng(seed){
+    // mulberry32
+    let t = seed >>> 0;
+    return function(){
+      t += 0x6D2B79F5;
+      let r = Math.imul(t ^ (t >>> 15), 1 | t);
+      r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function genStage(overallLevel){ // overallLevel is 1..106
+    const W=1600,H=1000;
+    const r = rng(12345 + overallLevel*999);
+
+    // difficulty ramps
+    const genIndex = overallLevel - 7; // 0..99
+    const wallCount = clamp(6 + Math.floor(genIndex*0.25), 6, 30);     // more blocks
+    const keyCount  = clamp(4 + Math.floor(genIndex*0.06), 4, 10);     // more keys slowly
+    const enemyCount= clamp(1 + Math.floor(genIndex*0.07), 1, 4);      // up to 4 enemies
+    const basePatrol= clamp(95 + genIndex*1.0, 95, 170);
+    const baseChase = clamp(140 + genIndex*1.4, 140, 220);
+    const baseView  = clamp(240 + genIndex*1.0, 240, 360);
+    const baseFov   = clamp((80 + genIndex*0.25), 80, 110) * Math.PI/180;
+
+    const walls = [...makeOuterWalls(W,H,20)];
+
+    // add furniture blocks (rectangles). Keep them not too huge.
+    for(let i=0;i<wallCount;i++){
+      const w = 140 + r()*260;
+      const h = 40 + r()*110;
+      const x = 140 + r()*(W - 280 - w);
+      const y = 140 + r()*(H - 280 - h);
+      walls.push({x,y,w,h});
+    }
+
+    // keys: scattered
+    const keys = [];
+    for(let i=0;i<keyCount;i++){
+      keys.push({x: 140 + r()*(W-280), y: 140 + r()*(H-280), t:false});
+    }
+
+    // enemies: each has a small patrol loop
+    const neighbors = [];
+    for(let e=0;e<enemyCount;e++){
+      const px = 220 + r()*(W-440);
+      const py = 220 + r()*(H-440);
+      const pts = [];
+      const ptCount = 3 + Math.floor(r()*3); // 3..5
+      for(let j=0;j<ptCount;j++){
+        pts.push({
+          x: 180 + r()*(W-360),
+          y: 180 + r()*(H-360)
+        });
+      }
+      neighbors.push({
+        x:px,y:py,r:18,a:r()*Math.PI*2,
+        fov: baseFov,
+        viewDist: baseView,
+        spPatrol: basePatrol * (0.92 + r()*0.18),
+        spChase:  baseChase  * (0.92 + r()*0.18),
+        pts, idx:0, state:"patrol", timer:0
+      });
+    }
+
+    // spawn: safe-ish corner area
+    const spawn = { x: 240, y: 840 };
+
+    return {
+      name: `Generated ${overallLevel}`,
+      W,H,walls,keys,spawn,neighbors
+    };
+  }
+
+  // Build total levels = 106 (6 handcrafted + 100 generated)
+  const TOTAL_LEVELS = 106;
+  lvlMaxEl.textContent = String(TOTAL_LEVELS);
+
+  function getStage(overallLevel){
+    if(overallLevel===1) return stage1();
+    if(overallLevel===2) return stage2();
+    if(overallLevel===3) return stage3();
+    if(overallLevel===4) return stage4();
+    if(overallLevel===5) return stage5();
+    if(overallLevel===6) return stage6();
+    return genStage(overallLevel);
+  }
+
+  // ---------------- Game State ----------------
+  let overallLevel = 1; // 1..106
+  let world = null;
+  let dead = false;
+  let clearing = false;
+
+  const player = { x:0, y:0, r:16, keys:0, run:false, sneak:false };
+  const cam = { x:0, y:0, zoom:1 };
+
+  const ks = Object.create(null);
+  addEventListener("keydown", (e) => {
+    const k = e.key.toLowerCase();
+    ks[k] = true;
+    if(k === "r") restartLevel();
+  });
+  addEventListener("keyup", (e) => ks[e.key.toLowerCase()] = false);
+
+  restartBtn.addEventListener("click", restartLevel);
+  skipBtn.addEventListener("click", () => nextLevel(true));
+  jump10Btn.addEventListener("click", () => jumpLevels(10));
+
+  function setMsg(t){ msgEl.textContent = t || ""; }
+
+  function collideCircle(p, r){
+    for(const w of world.walls) resolveCircleRect(p, r, w);
+  }
+
+  // ---------- Key safe placement ----------
+  function pointHitsWall(x, y, pad = 24){
+    for(const w of world.walls){
+      const rx = w.x - pad, ry = w.y - pad, rw = w.w + pad*2, rh = w.h + pad*2;
+      if(x >= rx && x <= rx+rw && y >= ry && y <= ry+rh) return true;
+    }
+    return false;
+  }
+
+  function moveKeysToSafeSpots(){
+    const pad = 26;
+    for(const k of world.keys){
+      if(k.t) continue;
+      if(!pointHitsWall(k.x, k.y, pad)) continue;
+
+      let ok = false;
+      for(let tries=0; tries<3000; tries++){
+        const x = 140 + Math.random() * (world.W - 280);
+        const y = 140 + Math.random() * (world.H - 280);
+        if(!pointHitsWall(x, y, pad)){
+          k.x = x; k.y = y;
+          ok = true;
+          break;
+        }
+      }
+      if(!ok){ k.x = world.W*0.5; k.y = world.H*0.5; }
+    }
+  }
+
+  // also keep spawn safe
+  function nudgeSpawnToSafe(){
+    const pad = 30;
+    if(!pointHitsWall(world.spawn.x, world.spawn.y, pad)) return;
+    for(let tries=0; tries<2000; tries++){
+      const x = 160 + Math.random() * (world.W - 320);
+      const y = 160 + Math.random() * (world.H - 320);
+      if(!pointHitsWall(x, y, pad)){
+        world.spawn.x = x; world.spawn.y = y;
+        return;
+      }
+    }
+  }
+
+  function loadLevel(levelNum){
+    overallLevel = clamp(levelNum, 1, TOTAL_LEVELS);
+    world = getStage(overallLevel);
+
+    // guarantee no impossible pickups
+    nudgeSpawnToSafe();
+    moveKeysToSafeSpots();
+
+    player.x = world.spawn.x;
+    player.y = world.spawn.y;
+    player.keys = 0;
+
+    dead = false;
+    clearing = false;
+
+    lvlEl.textContent = String(overallLevel);
+    needEl.textContent = String(world.keys.length);
+    keysEl.textContent = "0";
+    statusEl.textContent = world.neighbors.length ? "Be careful" : "Explore";
+
+    setMsg(`Level: ${world.name}${world.neighbors.length ? " • Avoid the red guards!" : ""}`);
+
+    cam.x = player.x; cam.y = player.y; cam.zoom = 1.0;
+  }
+
+  function restartLevel(){ loadLevel(overallLevel); }
+
+  function nextLevel(skipped=false){
+    if(overallLevel >= TOTAL_LEVELS){
+      setMsg("You finished all 106 levels ✅  Press R to replay.");
+      return;
+    }
+    loadLevel(overallLevel + 1);
+    if(skipped) setMsg("Skipped → next level.");
+  }
+
+  function jumpLevels(n){
+    loadLevel(overallLevel + n);
+  }
+
+  // ---------- LOS ----------
+  function rayBlocked(ax,ay,bx,by){
+    const steps = 24;
+    for(let i=1;i<=steps;i++){
+      const t = i/steps;
+      const x = ax + (bx-ax)*t;
+      const y = ay + (by-ay)*t;
+      for(const w of world.walls){
+        if(x>=w.x && x<=w.x+w.w && y>=w.y && y<=w.y+w.h) return true;
+      }
+    }
+    return false;
+  }
+
+  function neighborCanSee(n){
+    const d = dist(n.x,n.y, player.x,player.y);
+    if(d > n.viewDist) return false;
+
+    const angTo = Math.atan2(player.y-n.y, player.x-n.x);
+    const da = Math.abs(angNorm(angTo - n.a));
+    if(da > n.fov*0.5) return false;
+
+    if(rayBlocked(n.x,n.y, player.x,player.y)) return false;
+
+    if(player.sneak && d > n.viewDist*0.72) return false;
+    return true;
+  }
+
+  function stepNeighbor(n, dt){
+    const sees = neighborCanSee(n);
+    if(sees){
+      n.state = "chase";
+      n.timer = 1.0;
+    } else if(n.state === "chase"){
+      n.timer -= dt;
+      if(n.timer <= 0) n.state = "patrol";
+    }
+
+    let tx=n.x, ty=n.y, sp=n.spPatrol;
+    if(n.state === "patrol"){
+      const pt = n.pts[n.idx];
+      tx = pt.x; ty = pt.y; sp = n.spPatrol;
+      if(dist(n.x,n.y, tx,ty) < 22) n.idx = (n.idx + 1) % n.pts.length;
+    } else {
+      tx = player.x; ty = player.y; sp = n.spChase;
+    }
+
+    let vx = tx - n.x, vy = ty - n.y;
+    const m = Math.hypot(vx,vy);
+    if(m > 0.0001){
+      vx/=m; vy/=m;
+      n.a = Math.atan2(vy, vx);
+      n.x += vx * sp * dt;
+      n.y += vy * sp * dt;
+
+      const np = {x:n.x, y:n.y};
+      collideCircle(np, n.r);
+      n.x=np.x; n.y=np.y;
+    }
+  }
+
+  function die(){
+    dead = true;
+    setMsg("Caught ❌  Press R to restart.");
+    statusEl.textContent = "CAUGHT";
+  }
+
+  function clearLevel(){
+    if(clearing) return;
+    clearing = true;
+    statusEl.textContent = "CLEARED";
+    setMsg("Level cleared ✅  Loading next…");
+    setTimeout(() => nextLevel(false), 450);
+  }
+
+  // ---------------- Update / Draw ----------------
+  const KEY_PICKUP_RADIUS = 30;
+
+  function update(dt){
+    if(dead || clearing) return;
+
+    player.run = !!ks["shift"];
+    player.sneak = !!ks["control"];
+
+    let sp = 190;
+    if(player.run) sp = 270;
+    if(player.sneak) sp = 120;
+
+    let mx = (ks["d"]?1:0) - (ks["a"]?1:0);
+    let my = (ks["s"]?1:0) - (ks["w"]?1:0);
+
+    if(mx||my){
+      const m = Math.hypot(mx,my);
+      mx/=m; my/=m;
+      player.x += mx*sp*dt;
+      player.y += my*sp*dt;
+
+      const np = {x:player.x, y:player.y};
+      collideCircle(np, player.r);
+      player.x=np.x; player.y=np.y;
+    }
+
+    // keys
+    for(const k of world.keys){
+      if(k.t) continue;
+      if(dist(player.x,player.y, k.x,k.y) < KEY_PICKUP_RADIUS){
+        k.t = true;
+        player.keys++;
+        keysEl.textContent = String(player.keys);
+      }
+    }
+
+    // neighbors
+    let anyChase = false;
+    for(const n of world.neighbors){
+      stepNeighbor(n, dt);
+      if(n.state === "chase") anyChase = true;
+
+      if(dist(n.x,n.y, player.x,player.y) < (n.r + player.r - 4)){
+        die();
+        break;
+      }
+    }
+
+    if(!dead){
+      if(world.neighbors.length){
+        statusEl.textContent = anyChase ? "CHASE!" : "Hidden";
+      } else {
+        statusEl.textContent = "Explore";
+      }
+    }
+
+    if(player.keys === world.keys.length && world.keys.length > 0){
+      clearLevel();
+    }
+
+    cam.x = lerp(cam.x, player.x, 0.10);
+    cam.y = lerp(cam.y, player.y, 0.10);
+    cam.zoom = lerp(cam.zoom, player.sneak ? 1.08 : 1.0, 0.08);
+  }
+
+  function draw(){
+    const W = innerWidth, H = innerHeight;
+    ctx.fillStyle = "#0f172a";
+    ctx.fillRect(0,0,W,H);
+
+    ctx.save();
+    ctx.translate(W/2, H/2);
+    ctx.scale(cam.zoom, cam.zoom);
+    ctx.translate(-cam.x, -cam.y);
+
+    ctx.fillStyle = "#1a2233";
+    ctx.fillRect(0,0, world.W, world.H);
+
+    ctx.fillStyle = "#a7adb8";
+    for(const w of world.walls) ctx.fillRect(w.x,w.y,w.w,w.h);
+
+    for(const k of world.keys){
+      if(k.t) continue;
+      ctx.beginPath();
+      ctx.fillStyle = "#ffd400";
+      ctx.arc(k.x,k.y,10,0,Math.PI*2);
+      ctx.fill();
+      ctx.strokeStyle = "#2b2400";
+      ctx.lineWidth = 3;
+      ctx.stroke();
+    }
+
+    for(const n of world.neighbors){
+      ctx.save();
+      ctx.globalAlpha = 0.16;
+      ctx.fillStyle = "#ff2d2d";
+      ctx.beginPath();
+      ctx.moveTo(n.x,n.y);
+      ctx.arc(n.x,n.y, n.viewDist, n.a - n.fov/2, n.a + n.fov/2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+
+      ctx.beginPath();
+      ctx.fillStyle = "#ff3b3b";
+      ctx.arc(n.x,n.y, n.r, 0, Math.PI*2);
+      ctx.fill();
+      ctx.strokeStyle = "#300000";
+      ctx.lineWidth = 4;
+      ctx.stroke();
+    }
+
+    ctx.beginPath();
+    ctx.fillStyle = player.sneak ? "#7fd1ff" : (player.run ? "#a7ff7f" : "#ffffff");
+    ctx.arc(player.x,player.y, player.r, 0, Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle = "#0b0f16";
+    ctx.lineWidth = 4;
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  // ---------------- Loop ----------------
+  let last = performance.now();
+  function loop(now){
+    const dt = Math.min(0.03, (now-last)/1000);
+    last = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // start
+  loadLevel(1);
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
+
+

@@ -1,59 +1,70 @@
 <!doctype html>
 <html>
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Sneaky Neighbor – 106 Levels</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Sneaky Neighbor – Story + Endless (Fixed Transitions)</title>
 <style>
-  html,body{margin:0;height:100%;background:#0c0f16;overflow:hidden;font-family:system-ui}
+  :root{
+    --bg:#070b18;
+    --panel:rgba(0,0,0,.55);
+    --stroke:rgba(255,255,255,.14);
+    --text:#fff;
+  }
+  html,body{margin:0;height:100%;background:var(--bg);overflow:hidden}
+  body{
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial,
+      "Apple Color Emoji","Segoe UI Emoji";
+    letter-spacing:.2px;
+  }
   canvas{position:fixed;inset:0;width:100vw;height:100vh}
   #hud{
     position:fixed;left:12px;top:12px;z-index:10;
-    color:#fff;background:rgba(0,0,0,.55);
-    border:1px solid rgba(255,255,255,.14);
-    padding:10px 12px;border-radius:12px;
-    font-size:14px;line-height:1.25;min-width:260px;max-width:560px
+    color:var(--text);background:var(--panel);
+    border:1px solid var(--stroke);
+    padding:10px 12px;border-radius:14px;
+    font-size:14px;line-height:1.25;min-width:540px;
+    backdrop-filter: blur(6px);
   }
-  #btns{position:fixed;right:12px;top:12px;z-index:11;display:flex;gap:10px;flex-wrap:wrap}
+  #hud .row{display:flex;gap:10px;flex-wrap:wrap}
+  #hud .tag{padding:2px 8px;border-radius:999px;background:rgba(0,0,0,.30);border:1px solid var(--stroke)}
+  #hud b{font-weight:900}
+  #hud .small{margin-top:6px;font-size:12px;opacity:.88}
+  #btns{
+    position:fixed;right:12px;top:12px;z-index:11;
+    display:flex;gap:10px;flex-wrap:wrap;
+  }
   button{
-    background:#111;color:#fff;border:1px solid rgba(255,255,255,.18);
-    padding:10px 12px;border-radius:12px;cursor:pointer
+    background:#0f1426;color:#fff;border:1px solid var(--stroke);
+    padding:10px 12px;border-radius:14px;cursor:pointer;
+    font-weight:800;
   }
-  button:hover{background:#1a1a1a}
-  .small{opacity:.85;font-size:12px;margin-top:6px}
-  .warn{color:#ffd2d2}
+  button:hover{background:#141b33}
 </style>
 </head>
 <body>
-<div id="hud">
-  <div><b>Level:</b> <span id="lvl">1</span>/<span id="lvlMax">106</span> • <b>Keys:</b> <span id="keys">0</span>/<span id="need">0</span></div>
-  <div><b>Status:</b> <span id="status">Explore</span></div>
-  <div class="small">Move <b>WASD</b> • Run <b>Shift</b> • Sneak <b>Ctrl</b> • Restart <b>R</b></div>
-  <div class="small warn" id="msg"></div>
-</div>
-
+<div id="hud"></div>
 <div id="btns">
-  <button id="restart">Restart</button>
-  <button id="skip">Skip Level</button>
-  <button id="jump10">+10</button>
+  <button id="btnMenu">Menu (G)</button>
+  <button id="btnRestart">Restart (R)</button>
+  <button id="btnBack">Back (B)</button>
+  <button id="btnNext">Next (N)</button>
 </div>
-
 <canvas id="c"></canvas>
 
 <script>
 (() => {
+  /* =========================
+     CANVAS
+  ========================= */
   const c = document.getElementById("c");
   const ctx = c.getContext("2d", { alpha:false });
+  const hud = document.getElementById("hud");
 
-  const lvlEl = document.getElementById("lvl");
-  const lvlMaxEl = document.getElementById("lvlMax");
-  const keysEl = document.getElementById("keys");
-  const needEl = document.getElementById("need");
-  const statusEl = document.getElementById("status");
-  const msgEl = document.getElementById("msg");
-  const restartBtn = document.getElementById("restart");
-  const skipBtn = document.getElementById("skip");
-  const jump10Btn = document.getElementById("jump10");
+  const btnMenu = document.getElementById("btnMenu");
+  const btnRestart = document.getElementById("btnRestart");
+  const btnBack = document.getElementById("btnBack");
+  const btnNext = document.getElementById("btnNext");
 
   function resize(){
     const dpr = Math.max(1, Math.min(2, devicePixelRatio || 1));
@@ -64,28 +75,90 @@
   addEventListener("resize", resize);
   resize();
 
+  /* =========================
+     UTILS
+  ========================= */
   const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
   const dist=(ax,ay,bx,by)=>Math.hypot(ax-bx, ay-by);
   const lerp=(a,b,t)=>a+(b-a)*t;
   const angNorm=(a)=>{ while(a>Math.PI)a-=Math.PI*2; while(a<-Math.PI)a+=Math.PI*2; return a; };
 
-  // ---------------- Collision ----------------
-  function resolveCircleRect(p, r, rect){
-    const nx = clamp(p.x, rect.x, rect.x+rect.w);
-    const ny = clamp(p.y, rect.y, rect.y+rect.h);
+  function rng(seed){
+    let t = seed >>> 0;
+    return function(){
+      t += 0x6D2B79F5;
+      let r = Math.imul(t ^ (t >>> 15), 1 | t);
+      r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function farFrom(p,q,minD){ return dist(p.x,p.y,q.x,q.y) >= minD; }
+
+  /* =========================
+     SAVE + SKINS
+  ========================= */
+  const STORY_LEVELS = 106;
+  const SAVE_KEY = "sneaky_neighbor_fixed_v2";
+
+  const SKINS = [
+    {name:"Classic", color:"#ffffff", unlock:1},
+    {name:"Neon",    color:"#00ffcc", unlock:10},
+    {name:"Gold",    color:"#ffd166", unlock:25},
+    {name:"Shadow",  color:"#9b5cff", unlock:50},
+    {name:"Lime",    color:"#b6ff4a", unlock:75},
+    {name:"Ember",   color:"#ff6b4a", unlock:100},
+  ];
+
+  let save = { highest: 1, skinIndex: 0, endlessBest: 0, endlessBestScore: 0 };
+
+  function loadSave(){
+    try{
+      const raw = localStorage.getItem(SAVE_KEY);
+      if(!raw) return;
+      const d = JSON.parse(raw);
+      if(typeof d.highest==="number") save.highest = Math.max(1, d.highest|0);
+      if(typeof d.skinIndex==="number") save.skinIndex = d.skinIndex|0;
+      if(typeof d.endlessBest==="number") save.endlessBest = Math.max(0, d.endlessBest|0);
+      if(typeof d.endlessBestScore==="number") save.endlessBestScore = Math.max(0, d.endlessBestScore|0);
+    }catch(e){}
+  }
+  function writeSave(){ localStorage.setItem(SAVE_KEY, JSON.stringify(save)); }
+
+  function currentSkin(){
+    save.skinIndex = clamp(save.skinIndex, 0, SKINS.length-1);
+    while(save.skinIndex>0 && save.highest < SKINS[save.skinIndex].unlock) save.skinIndex--;
+    return SKINS[save.skinIndex];
+  }
+  function nextSkin(){
+    for(let i=1;i<=SKINS.length;i++){
+      const idx = (save.skinIndex + i) % SKINS.length;
+      if(save.highest >= SKINS[idx].unlock){
+        save.skinIndex = idx;
+        writeSave();
+        return;
+      }
+    }
+  }
+
+  /* =========================
+     COLLISION
+  ========================= */
+  function resolveCircleRect(p, r, w){
+    const nx = clamp(p.x, w.x, w.x+w.w);
+    const ny = clamp(p.y, w.y, w.y+w.h);
     let dx = p.x - nx, dy = p.y - ny;
     const d2 = dx*dx + dy*dy;
 
     if(d2 === 0){
-      const left = Math.abs(p.x - rect.x);
-      const right = Math.abs((rect.x+rect.w) - p.x);
-      const top = Math.abs(p.y - rect.y);
-      const bottom = Math.abs((rect.y+rect.h) - p.y);
+      const left = Math.abs(p.x - w.x);
+      const right = Math.abs((w.x+w.w) - p.x);
+      const top = Math.abs(p.y - w.y);
+      const bottom = Math.abs((w.y+w.h) - p.y);
       const m = Math.min(left,right,top,bottom);
-      if(m === left) p.x = rect.x - r - 0.5;
-      else if(m === right) p.x = rect.x+rect.w + r + 0.5;
-      else if(m === top) p.y = rect.y - r - 0.5;
-      else p.y = rect.y+rect.h + r + 0.5;
+      if(m === left) p.x = w.x - r - 0.5;
+      else if(m === right) p.x = w.x+w.w + r + 0.5;
+      else if(m === top) p.y = w.y - r - 0.5;
+      else p.y = w.y+w.h + r + 0.5;
       return;
     }
 
@@ -96,322 +169,46 @@
       p.y += (dy/d) * push;
     }
   }
-
-  function makeOuterWalls(W,H,th=20){
-    return [
-      {x:80,y:80,w:W-160,h:th},
-      {x:80,y:H-80-th,w:W-160,h:th},
-      {x:80,y:80+th,w:th,h:H-160-th},
-      {x:W-80-th,y:80+th,w:th,h:H-160-th},
-    ];
-  }
-
-  // ---------------- Handcrafted early levels (same idea as before) ----------------
-  function stage1(){
-    const W=1600,H=1000;
-    return {
-      name:"Open Warm-up", W,H,
-      walls:[...makeOuterWalls(W,H,20),
-        {x:400,y:300,w:220,h:80},{x:900,y:250,w:260,h:90},{x:500,y:650,w:300,h:90},{x:1050,y:700,w:260,h:80}
-      ],
-      keys:[{x:200,y:200,t:false},{x:1400,y:200,t:false},{x:1400,y:850,t:false}],
-      spawn:{x:300,y:800},
-      neighbors:[]
-    };
-  }
-  function stage2(){
-    const W=1600,H=1000;
-    return {
-      name:"First Hunt", W,H,
-      walls:[...makeOuterWalls(W,H,20),
-        {x:260,y:240,w:360,h:70},{x:980,y:240,w:360,h:70},{x:560,y:470,w:480,h:70},{x:300,y:730,w:320,h:70},{x:1100,y:730,w:260,h:70}
-      ],
-      keys:[{x:180,y:160,t:false},{x:1420,y:160,t:false},{x:1420,y:850,t:false},{x:180,y:850,t:false}],
-      spawn:{x:300,y:800},
-      neighbors:[{
-        x:800,y:170,r:18,a:Math.PI/2,
-        fov:70*Math.PI/180, viewDist:210,
-        spPatrol:85, spChase:120,
-        pts:[{x:800,y:170},{x:1250,y:500},{x:350,y:500},{x:800,y:830}],
-        idx:0, state:"patrol", timer:0
-      }]
-    };
-  }
-  function stage3(){
-    const W=1600,H=1000;
-    return {
-      name:"Wide Eyes", W,H,
-      walls:[...makeOuterWalls(W,H,20),
-        {x:220,y:190,w:420,h:70},{x:980,y:190,w:420,h:70},{x:540,y:330,w:520,h:70},
-        {x:220,y:520,w:420,h:70},{x:980,y:520,w:420,h:70},{x:540,y:660,w:520,h:70}
-      ],
-      keys:[{x:180,y:160,t:false},{x:1420,y:160,t:false},{x:800,y:850,t:false},{x:180,y:850,t:false},{x:1420,y:850,t:false}],
-      spawn:{x:300,y:800},
-      neighbors:[{
-        x:800,y:170,r:18,a:0,
-        fov:85*Math.PI/180, viewDist:260,
-        spPatrol:95, spChase:145,
-        pts:[{x:800,y:170},{x:1400,y:500},{x:800,y:830},{x:200,y:500}],
-        idx:0, state:"patrol", timer:0
-      }]
-    };
-  }
-  function stage4(){
-    const W=1600,H=1000;
-    return {
-      name:"Two Watchers", W,H,
-      walls:[...makeOuterWalls(W,H,20),
-        {x:320,y:240,w:260,h:90},{x:650,y:240,w:300,h:90},{x:1020,y:240,w:260,h:90},
-        {x:320,y:470,w:960,h:70},
-        {x:320,y:680,w:260,h:90},{x:650,y:680,w:300,h:90},{x:1020,y:680,w:260,h:90}
-      ],
-      keys:[{x:180,y:160,t:false},{x:1420,y:160,t:false},{x:800,y:160,t:false},{x:180,y:850,t:false},{x:1420,y:850,t:false}],
-      spawn:{x:800,y:850},
-      neighbors:[
-        {x:450,y:500,r:18,a:0,fov:80*Math.PI/180,viewDist:235,spPatrol:95,spChase:145,pts:[{x:450,y:500},{x:450,y:820},{x:450,y:180}],idx:0,state:"patrol",timer:0},
-        {x:1150,y:500,r:18,a:Math.PI,fov:80*Math.PI/180,viewDist:235,spPatrol:95,spChase:145,pts:[{x:1150,y:500},{x:1150,y:180},{x:1150,y:820}],idx:0,state:"patrol",timer:0},
-      ]
-    };
-  }
-  function stage5(){
-    const W=1600,H=1000;
-    return {
-      name:"The Lanes", W,H,
-      walls:[...makeOuterWalls(W,H,20),
-        {x:220,y:180,w:1160,h:35},{x:220,y:300,w:1160,h:35},{x:220,y:420,w:1160,h:35},
-        {x:220,y:540,w:1160,h:35},{x:220,y:660,w:1160,h:35},{x:220,y:780,w:1160,h:35},
-        {x:460,y:215,w:35,h:565},{x:780,y:215,w:35,h:565},{x:1100,y:215,w:35,h:565}
-      ],
-      keys:[{x:180,y:160,t:false},{x:1420,y:160,t:false},{x:180,y:850,t:false},{x:1420,y:850,t:false},{x:800,y:850,t:false},{x:800,y:160,t:false}],
-      spawn:{x:300,y:850},
-      neighbors:[{x:800,y:500,r:18,a:0,fov:90*Math.PI/180,viewDist:275,spPatrol:110,spChase:165,pts:[{x:800,y:500},{x:800,y:180},{x:800,y:820}],idx:0,state:"patrol",timer:0}]
-    };
-  }
-  function stage6(){
-    const W=1600,H=1000;
-    return {
-      name:"Final House", W,H,
-      walls:[...makeOuterWalls(W,H,20),
-        {x:300,y:180,w:1000,h:60},{x:300,y:320,w:420,h:60},{x:880,y:320,w:420,h:60},
-        {x:520,y:460,w:560,h:60},{x:300,y:600,w:420,h:60},{x:880,y:600,w:420,h:60},{x:300,y:740,w:1000,h:60},
-        {x:760,y:240,w:60,h:520},{x:520,y:380,w:60,h:280},{x:1020,y:380,w:60,h:280}
-      ],
-      keys:[{x:180,y:160,t:false},{x:1420,y:160,t:false},{x:800,y:160,t:false},{x:180,y:850,t:false},{x:1420,y:850,t:false},{x:800,y:850,t:false},{x:800,y:500,t:false}],
-      spawn:{x:300,y:500},
-      neighbors:[
-        {x:450,y:500,r:18,a:0,fov:95*Math.PI/180,viewDist:300,spPatrol:120,spChase:185,pts:[{x:450,y:200},{x:450,y:800},{x:800,y:500}],idx:0,state:"patrol",timer:0},
-        {x:1150,y:500,r:18,a:Math.PI,fov:95*Math.PI/180,viewDist:300,spPatrol:120,spChase:185,pts:[{x:1150,y:800},{x:1150,y:200},{x:800,y:500}],idx:0,state:"patrol",timer:0}
-      ]
-    };
-  }
-
-  // ---------------- Procedural generator: creates level N (1-based overall) ----------------
-  // We generate 100 more levels: overall levels 7..106
-  function rng(seed){
-    // mulberry32
-    let t = seed >>> 0;
-    return function(){
-      t += 0x6D2B79F5;
-      let r = Math.imul(t ^ (t >>> 15), 1 | t);
-      r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
-      return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
-    };
-  }
-
-  function genStage(overallLevel){ // overallLevel is 1..106
-    const W=1600,H=1000;
-    const r = rng(12345 + overallLevel*999);
-
-    // difficulty ramps
-    const genIndex = overallLevel - 7; // 0..99
-    const wallCount = clamp(6 + Math.floor(genIndex*0.25), 6, 30);     // more blocks
-    const keyCount  = clamp(4 + Math.floor(genIndex*0.06), 4, 10);     // more keys slowly
-    const enemyCount= clamp(1 + Math.floor(genIndex*0.07), 1, 4);      // up to 4 enemies
-    const basePatrol= clamp(95 + genIndex*1.0, 95, 170);
-    const baseChase = clamp(140 + genIndex*1.4, 140, 220);
-    const baseView  = clamp(240 + genIndex*1.0, 240, 360);
-    const baseFov   = clamp((80 + genIndex*0.25), 80, 110) * Math.PI/180;
-
-    const walls = [...makeOuterWalls(W,H,20)];
-
-    // add furniture blocks (rectangles). Keep them not too huge.
-    for(let i=0;i<wallCount;i++){
-      const w = 140 + r()*260;
-      const h = 40 + r()*110;
-      const x = 140 + r()*(W - 280 - w);
-      const y = 140 + r()*(H - 280 - h);
-      walls.push({x,y,w,h});
-    }
-
-    // keys: scattered
-    const keys = [];
-    for(let i=0;i<keyCount;i++){
-      keys.push({x: 140 + r()*(W-280), y: 140 + r()*(H-280), t:false});
-    }
-
-    // enemies: each has a small patrol loop
-    const neighbors = [];
-    for(let e=0;e<enemyCount;e++){
-      const px = 220 + r()*(W-440);
-      const py = 220 + r()*(H-440);
-      const pts = [];
-      const ptCount = 3 + Math.floor(r()*3); // 3..5
-      for(let j=0;j<ptCount;j++){
-        pts.push({
-          x: 180 + r()*(W-360),
-          y: 180 + r()*(H-360)
-        });
-      }
-      neighbors.push({
-        x:px,y:py,r:18,a:r()*Math.PI*2,
-        fov: baseFov,
-        viewDist: baseView,
-        spPatrol: basePatrol * (0.92 + r()*0.18),
-        spChase:  baseChase  * (0.92 + r()*0.18),
-        pts, idx:0, state:"patrol", timer:0
-      });
-    }
-
-    // spawn: safe-ish corner area
-    const spawn = { x: 240, y: 840 };
-
-    return {
-      name: `Generated ${overallLevel}`,
-      W,H,walls,keys,spawn,neighbors
-    };
-  }
-
-  // Build total levels = 106 (6 handcrafted + 100 generated)
-  const TOTAL_LEVELS = 106;
-  lvlMaxEl.textContent = String(TOTAL_LEVELS);
-
-  function getStage(overallLevel){
-    if(overallLevel===1) return stage1();
-    if(overallLevel===2) return stage2();
-    if(overallLevel===3) return stage3();
-    if(overallLevel===4) return stage4();
-    if(overallLevel===5) return stage5();
-    if(overallLevel===6) return stage6();
-    return genStage(overallLevel);
-  }
-
-  // ---------------- Game State ----------------
-  let overallLevel = 1; // 1..106
-  let world = null;
-  let dead = false;
-  let clearing = false;
-
-  const player = { x:0, y:0, r:16, keys:0, run:false, sneak:false };
-  const cam = { x:0, y:0, zoom:1 };
-
-  const ks = Object.create(null);
-  addEventListener("keydown", (e) => {
-    const k = e.key.toLowerCase();
-    ks[k] = true;
-    if(k === "r") restartLevel();
-  });
-  addEventListener("keyup", (e) => ks[e.key.toLowerCase()] = false);
-
-  restartBtn.addEventListener("click", restartLevel);
-  skipBtn.addEventListener("click", () => nextLevel(true));
-  jump10Btn.addEventListener("click", () => jumpLevels(10));
-
-  function setMsg(t){ msgEl.textContent = t || ""; }
-
   function collideCircle(p, r){
     for(const w of world.walls) resolveCircleRect(p, r, w);
   }
-
-  // ---------- Key safe placement ----------
-  function pointHitsWall(x, y, pad = 24){
+  function circleHitsAnyWall(x,y,r){
+    const p={x,y};
+    const bx=x, by=y;
     for(const w of world.walls){
-      const rx = w.x - pad, ry = w.y - pad, rw = w.w + pad*2, rh = w.h + pad*2;
-      if(x >= rx && x <= rx+rw && y >= ry && y <= ry+rh) return true;
+      resolveCircleRect(p, r, w);
+      if(p.x!==bx || p.y!==by) return true;
     }
     return false;
   }
 
-  function moveKeysToSafeSpots(){
-    const pad = 26;
-    for(const k of world.keys){
-      if(k.t) continue;
-      if(!pointHitsWall(k.x, k.y, pad)) continue;
+  /* =========================
+     GUARDS
+  ========================= */
+  function applyGuardType(g, type, d01){
+    g.type = type;
+    let viewDist=260, fovDeg=85, spPatrol=95, spChase=155, color="#ff3b3b";
+    if(type==="WATCHER"){viewDist=340;fovDeg=110;spPatrol=78; spChase=120;color="#ff4dd2";}
+    if(type==="RUNNER"){ viewDist=235;fovDeg=70; spPatrol=115;spChase=205;color="#ff9f1c";}
 
-      let ok = false;
-      for(let tries=0; tries<3000; tries++){
-        const x = 140 + Math.random() * (world.W - 280);
-        const y = 140 + Math.random() * (world.H - 280);
-        if(!pointHitsWall(x, y, pad)){
-          k.x = x; k.y = y;
-          ok = true;
-          break;
-        }
-      }
-      if(!ok){ k.x = world.W*0.5; k.y = world.H*0.5; }
-    }
+    const dv = lerp(0, 80, d01);
+    const ds = lerp(0, 50, d01);
+
+    g.viewDist = viewDist + dv;
+    g.fov = (fovDeg + lerp(0,10,d01)) * Math.PI/180;
+    g.spPatrol = spPatrol + ds*0.55;
+    g.spChase  = spChase  + ds*0.85;
+    g.color = color;
+
+    g.state = g.state || "patrol";
+    g.timer = g.timer || 0;
   }
 
-  // also keep spawn safe
-  function nudgeSpawnToSafe(){
-    const pad = 30;
-    if(!pointHitsWall(world.spawn.x, world.spawn.y, pad)) return;
-    for(let tries=0; tries<2000; tries++){
-      const x = 160 + Math.random() * (world.W - 320);
-      const y = 160 + Math.random() * (world.H - 320);
-      if(!pointHitsWall(x, y, pad)){
-        world.spawn.x = x; world.spawn.y = y;
-        return;
-      }
-    }
-  }
-
-  function loadLevel(levelNum){
-    overallLevel = clamp(levelNum, 1, TOTAL_LEVELS);
-    world = getStage(overallLevel);
-
-    // guarantee no impossible pickups
-    nudgeSpawnToSafe();
-    moveKeysToSafeSpots();
-
-    player.x = world.spawn.x;
-    player.y = world.spawn.y;
-    player.keys = 0;
-
-    dead = false;
-    clearing = false;
-
-    lvlEl.textContent = String(overallLevel);
-    needEl.textContent = String(world.keys.length);
-    keysEl.textContent = "0";
-    statusEl.textContent = world.neighbors.length ? "Be careful" : "Explore";
-
-    setMsg(`Level: ${world.name}${world.neighbors.length ? " • Avoid the red guards!" : ""}`);
-
-    cam.x = player.x; cam.y = player.y; cam.zoom = 1.0;
-  }
-
-  function restartLevel(){ loadLevel(overallLevel); }
-
-  function nextLevel(skipped=false){
-    if(overallLevel >= TOTAL_LEVELS){
-      setMsg("You finished all 106 levels ✅  Press R to replay.");
-      return;
-    }
-    loadLevel(overallLevel + 1);
-    if(skipped) setMsg("Skipped → next level.");
-  }
-
-  function jumpLevels(n){
-    loadLevel(overallLevel + n);
-  }
-
-  // ---------- LOS ----------
   function rayBlocked(ax,ay,bx,by){
-    const steps = 24;
+    const steps = 26;
     for(let i=1;i<=steps;i++){
-      const t = i/steps;
-      const x = ax + (bx-ax)*t;
-      const y = ay + (by-ay)*t;
+      const t=i/steps;
+      const x=ax+(bx-ax)*t, y=ay+(by-ay)*t;
       for(const w of world.walls){
         if(x>=w.x && x<=w.x+w.w && y>=w.y && y<=w.y+w.h) return true;
       }
@@ -419,136 +216,639 @@
     return false;
   }
 
-  function neighborCanSee(n){
-    const d = dist(n.x,n.y, player.x,player.y);
-    if(d > n.viewDist) return false;
+  let spawnGrace = 0;
 
-    const angTo = Math.atan2(player.y-n.y, player.x-n.x);
-    const da = Math.abs(angNorm(angTo - n.a));
-    if(da > n.fov*0.5) return false;
+  function guardCanSee(g){
+    if(spawnGrace > 0) return false;
 
-    if(rayBlocked(n.x,n.y, player.x,player.y)) return false;
+    const d = dist(g.x,g.y, player.x,player.y);
+    const sneakFactor = player.sneak ? 0.78 : 1.0;
+    if(d > g.viewDist * sneakFactor) return false;
 
-    if(player.sneak && d > n.viewDist*0.72) return false;
+    const angTo = Math.atan2(player.y-g.y, player.x-g.x);
+    const da = Math.abs(angNorm(angTo - g.a));
+    if(da > g.fov*0.5) return false;
+
+    if(rayBlocked(g.x,g.y, player.x,player.y)) return false;
     return true;
   }
 
-  function stepNeighbor(n, dt){
-    const sees = neighborCanSee(n);
+  function stepGuard(g, dt){
+    const sees = guardCanSee(g);
     if(sees){
-      n.state = "chase";
-      n.timer = 1.0;
-    } else if(n.state === "chase"){
-      n.timer -= dt;
-      if(n.timer <= 0) n.state = "patrol";
+      g.state="chase";
+      g.timer=1.2;
+    } else if(g.state==="chase"){
+      g.timer -= dt;
+      if(g.timer<=0) g.state="patrol";
     }
 
-    let tx=n.x, ty=n.y, sp=n.spPatrol;
-    if(n.state === "patrol"){
-      const pt = n.pts[n.idx];
-      tx = pt.x; ty = pt.y; sp = n.spPatrol;
-      if(dist(n.x,n.y, tx,ty) < 22) n.idx = (n.idx + 1) % n.pts.length;
+    let tx=g.x, ty=g.y, sp=g.spPatrol;
+    if(g.state==="patrol"){
+      const pt=g.pts[g.idx];
+      tx=pt.x; ty=pt.y; sp=g.spPatrol;
+      if(dist(g.x,g.y,tx,ty)<22) g.idx=(g.idx+1)%g.pts.length;
     } else {
-      tx = player.x; ty = player.y; sp = n.spChase;
+      tx=player.x; ty=player.y; sp=g.spChase;
     }
 
-    let vx = tx - n.x, vy = ty - n.y;
-    const m = Math.hypot(vx,vy);
-    if(m > 0.0001){
+    let vx=tx-g.x, vy=ty-g.y;
+    const m=Math.hypot(vx,vy);
+    if(m>0.0001){
       vx/=m; vy/=m;
-      n.a = Math.atan2(vy, vx);
-      n.x += vx * sp * dt;
-      n.y += vy * sp * dt;
+      g.a = Math.atan2(vy,vx);
+      g.x += vx*sp*dt;
+      g.y += vy*sp*dt;
 
-      const np = {x:n.x, y:n.y};
-      collideCircle(np, n.r);
-      n.x=np.x; n.y=np.y;
+      const np={x:g.x,y:g.y};
+      collideCircle(np, g.r);
+      g.x=np.x; g.y=np.y;
+    }
+  }
+
+  /* =========================
+     LEVEL HELPERS
+  ========================= */
+  function outerWalls(W,H,th=20){
+    return [
+      {x:80,y:80,w:W-160,h:th},
+      {x:80,y:H-80-th,w:W-160,h:th},
+      {x:80,y:80+th,w:th,h:H-160-th},
+      {x:W-80-th,y:80+th,w:th,h:H-160-th},
+    ];
+  }
+  function placePointSafe(r, W, H, radius, tries=650){
+    for(let i=0;i<tries;i++){
+      const x = 120 + r()*(W-240);
+      const y = 120 + r()*(H-240);
+      if(!circleHitsAnyWall(x,y,radius)) return {x,y};
+    }
+    return {x:W/2,y:H/2};
+  }
+  function ensureFarPlacement(makePointFn, spawn, exit, minSpawn, minExit, tries=150){
+    let p = makePointFn();
+    for(let i=0;i<tries && (!farFrom(p, spawn, minSpawn) || !farFrom(p, exit, minExit)); i++){
+      p = makePointFn();
+    }
+    return p;
+  }
+
+  /* =========================
+     OPEN/BLOCKY GENERATOR
+  ========================= */
+  function openBlocky(pseudoLevel, seedSalt=0){
+    const W=1600, H=1000;
+    const d01 = clamp((pseudoLevel-7)/99, 0, 1);
+    const r = rng(111111 + pseudoLevel*1337 + seedSalt*99991);
+
+    const w = { W,H, style:"OPEN", walls:[...outerWalls(W,H,20)], keys:[],
+      spawn:{x:240,y:840}, exit:{x:1380,y:840,open:false}, guards:[]
+    };
+
+    const blocks = clamp(8 + Math.floor(d01*12), 8, 20);
+    for(let i=0;i<blocks;i++){
+      const bw = 160 + r()*340;
+      const bh =  80 + r()*230;
+      const x = 140 + r()*(W-280-bw);
+      const y = 140 + r()*(H-280-bh);
+      const sx = Math.round(x/20)*20;
+      const sy = Math.round(y/20)*20;
+      const sw = Math.round(bw/20)*20;
+      const sh = Math.round(bh/20)*20;
+      w.walls.push({x:sx,y:sy,w:sw,h:sh});
+    }
+
+    world = w; // for collision tests
+
+    w.spawn = placePointSafe(r, W,H, 18);
+    w.exit  = ensureFarPlacement(() => placePointSafe(r, W,H, 18), w.spawn, w.spawn, 420, 0, 160);
+    w.exit.open=false;
+
+    const keyCount = clamp(3 + Math.floor(d01*3), 3, 6);
+    for(let i=0;i<keyCount;i++){
+      const p = ensureFarPlacement(() => placePointSafe(r, W,H, 18), w.spawn, w.exit, 170, 120, 190);
+      w.keys.push({x:p.x,y:p.y,t:false});
+    }
+
+    const SAFE_SPAWN = 280;
+    const SAFE_EXIT  = 240;
+    const guardCount = clamp(1 + Math.floor(d01*2), 1, 3);
+    const types = ["GUARD","RUNNER","WATCHER"];
+
+    for(let g=0; g<guardCount; g++){
+      const type = types[Math.floor(r()*types.length)];
+      const gp = ensureFarPlacement(() => placePointSafe(r, W,H, 22), w.spawn, w.exit, SAFE_SPAWN, SAFE_EXIT, 220);
+
+      const pts=[];
+      const ptCount = 3 + Math.floor(r()*3);
+      for(let p=0;p<ptCount;p++){
+        const pp = ensureFarPlacement(() => placePointSafe(r, W,H, 22), w.spawn, w.exit, SAFE_SPAWN, SAFE_EXIT, 180);
+        pts.push({x:pp.x,y:pp.y});
+      }
+
+      const guard={x:gp.x,y:gp.y,r:18,a:r()*Math.PI*2,pts,idx:0,state:"patrol",timer:0};
+      applyGuardType(guard, type, d01);
+      w.guards.push(guard);
+    }
+
+    return w;
+  }
+
+  /* =========================
+     ROOMS GENERATOR
+  ========================= */
+  function carveRect(grid, x0,y0,w,h){
+    const H=grid.length, W=grid[0].length;
+    for(let y=y0;y<y0+h;y++){
+      if(y<0||y>=H) continue;
+      for(let x=x0;x<x0+w;x++){
+        if(x<0||x>=W) continue;
+        grid[y][x]=1;
+      }
+    }
+  }
+  function carveCorridor(grid, x1,y1,x2,y2, r){
+    const w = 3; // change to 5 for super-wide
+    const half = Math.floor(w/2);
+
+    const carveH = (xa, xb, y) => {
+      const x0 = Math.min(xa, xb);
+      const xN = Math.max(xa, xb);
+      carveRect(grid, x0, y-half, (xN-x0)+1, w);
+    };
+    const carveV = (x, ya, yb) => {
+      const y0 = Math.min(ya, yb);
+      const yN = Math.max(ya, yb);
+      carveRect(grid, x-half, y0, w, (yN-y0)+1);
+    };
+
+    if(r()<0.5){ carveH(x1,x2,y1); carveV(x2,y1,y2); }
+    else { carveV(x1,y1,y2); carveH(x1,x2,y2); }
+  }
+  function gridToWalls(grid, tile){
+    const H=grid.length, W=grid[0].length;
+    const rows=[];
+    for(let y=0;y<H;y++){
+      let x=0;
+      while(x<W){
+        if(grid[y][x]===0){
+          let x0=x;
+          while(x<W && grid[y][x]===0) x++;
+          rows.push({x:x0*tile,y:y*tile,w:(x-x0)*tile,h:tile});
+        } else x++;
+      }
+    }
+    rows.sort((a,b)=>(a.x-b.x)||(a.w-b.w)||(a.y-b.y));
+    const merged=[];
+    for(const w of rows){
+      const last = merged[merged.length-1];
+      if(last && last.x===w.x && last.w===w.w && last.y+last.h===w.y) last.h += w.h;
+      else merged.push({...w});
+    }
+    return merged;
+  }
+  function roomCenter(rm){ return {cx: rm.x + (rm.w>>1), cy: rm.y + (rm.h>>1)}; }
+  function pickRoomPoint(rm, tile, r){
+    const x = rm.x + 1 + Math.floor(r()*Math.max(1, rm.w-2));
+    const y = rm.y + 1 + Math.floor(r()*Math.max(1, rm.h-2));
+    return {x: x*tile + tile/2, y: y*tile + tile/2};
+  }
+
+  function roomsLevel(pseudoLevel, seedSalt=0){
+    const W=1600, H=1000;
+    const tile=20;
+    const GW=Math.floor(W/tile), GH=Math.floor(H/tile);
+    const d01 = clamp((pseudoLevel-7)/99, 0, 1);
+
+    const marginCells = 4;
+    const minCell = marginCells + 1;
+    const maxX = GW - marginCells - 1;
+    const maxY = GH - marginCells - 1;
+
+    for(let attempt=0; attempt<28; attempt++){
+      const r = rng(424242 + pseudoLevel*911 + attempt*9991 + seedSalt*77777);
+
+      const grid = Array.from({length:GH}, ()=>Array.from({length:GW}, ()=>0));
+      const rooms=[];
+      const targetRooms = clamp(7 + Math.floor(d01*10), 7, 17);
+
+      for(let t=0; t<360 && rooms.length<targetRooms; t++){
+        const rw = 7 + Math.floor(r()*10);
+        const rh = 6 + Math.floor(r()*8);
+        const rx = minCell + Math.floor(r() * Math.max(1, (maxX - minCell - rw)));
+        const ry = minCell + Math.floor(r() * Math.max(1, (maxY - minCell - rh)));
+        const nr = {x:rx,y:ry,w:rw,h:rh};
+
+        let ok=true;
+        for(const rm of rooms){
+          const sep=2;
+          if(!(nr.x+nr.w+sep < rm.x || rm.x+rm.w+sep < nr.x || nr.y+nr.h+sep < rm.y || rm.y+rm.h+sep < nr.y)){
+            ok=false; break;
+          }
+        }
+        if(!ok) continue;
+        rooms.push(nr);
+        carveRect(grid, rx,ry,rw,rh);
+      }
+      if(rooms.length < 6) continue;
+
+      for(let i=1;i<rooms.length;i++){
+        const a=roomCenter(rooms[i]);
+        let best=0,bestD=1e9;
+        for(let j=0;j<i;j++){
+          const b=roomCenter(rooms[j]);
+          const dd=(a.cx-b.cx)*(a.cx-b.cx)+(a.cy-b.cy)*(a.cy-b.cy);
+          if(dd<bestD){bestD=dd;best=j;}
+        }
+        const b=roomCenter(rooms[best]);
+        carveCorridor(grid, a.cx,a.cy, b.cx,b.cy, r);
+      }
+
+      const extraLinks = clamp(2 + Math.floor(d01*3), 2, 5);
+      for(let k=0;k<extraLinks;k++){
+        const i=Math.floor(r()*rooms.length);
+        const j=Math.floor(r()*rooms.length);
+        if(i===j) continue;
+        const a=roomCenter(rooms[i]), b=roomCenter(rooms[j]);
+        carveCorridor(grid, a.cx,a.cy, b.cx,b.cy, r);
+      }
+
+      const walls = [...outerWalls(W,H,20), ...gridToWalls(grid, tile)];
+
+      let ra=0, rb=rooms.length-1, best=-1;
+      for(let i=0;i<rooms.length;i++){
+        for(let j=i+1;j<rooms.length;j++){
+          const A=roomCenter(rooms[i]), B=roomCenter(rooms[j]);
+          const dd=(A.cx-B.cx)*(A.cx-B.cx)+(A.cy-B.cy)*(A.cy-B.cy);
+          if(dd>best){best=dd;ra=i;rb=j;}
+        }
+      }
+
+      const spawn = pickRoomPoint(rooms[ra], tile, r);
+      const exit  = pickRoomPoint(rooms[rb], tile, r);
+
+      const used=new Set([ra,rb]);
+      const keyCount = clamp(4 + Math.floor(d01*4), 4, 8);
+      const keys=[];
+      for(let i=0;i<keyCount;i++){
+        let ri=Math.floor(r()*rooms.length);
+        for(let t=0;t<60 && used.has(ri); t++) ri=Math.floor(r()*rooms.length);
+        used.add(ri);
+        const kp = pickRoomPoint(rooms[ri], tile, r);
+        keys.push({x:kp.x,y:kp.y,t:false});
+      }
+
+      const SAFE_SPAWN = 280;
+      const SAFE_EXIT  = 240;
+
+      const guards=[];
+      const guardCount = clamp(1 + Math.floor(d01*3), 1, 4);
+      const types=["GUARD","RUNNER","WATCHER"];
+
+      for(let g=0; g<guardCount; g++){
+        const type=types[Math.floor(r()*types.length)];
+
+        let gp = pickRoomPoint(rooms[Math.floor(r()*rooms.length)], tile, r);
+        for(let tries=0; tries<160 && (!farFrom(gp, spawn, SAFE_SPAWN) || !farFrom(gp, exit, SAFE_EXIT)); tries++){
+          gp = pickRoomPoint(rooms[Math.floor(r()*rooms.length)], tile, r);
+        }
+
+        const pts=[];
+        const ptCount=3+Math.floor(r()*3);
+        for(let p=0;p<ptCount;p++){
+          let pp = pickRoomPoint(rooms[Math.floor(r()*rooms.length)], tile, r);
+          for(let tries=0; tries<130 && (!farFrom(pp, spawn, SAFE_SPAWN) || !farFrom(pp, exit, SAFE_EXIT)); tries++){
+            pp = pickRoomPoint(rooms[Math.floor(r()*rooms.length)], tile, r);
+          }
+          pts.push({x:pp.x,y:pp.y});
+        }
+
+        const guard={x:gp.x,y:gp.y,r:18,a:r()*Math.PI*2,pts,idx:0,state:"patrol",timer:0};
+        applyGuardType(guard, type, d01);
+        guards.push(guard);
+      }
+
+      return { W,H, style:"ROOMS", walls, keys, spawn:{x:spawn.x,y:spawn.y}, exit:{x:exit.x,y:exit.y,open:false}, guards };
+    }
+
+    return openBlocky(pseudoLevel, seedSalt+1);
+  }
+
+  /* =========================
+     HANDCRAFTED STORY 1–6
+  ========================= */
+  function handcrafted(level){
+    const W=1600, H=1000;
+    const base = {W,H, style:"HAND", walls:[...outerWalls(W,H,20)], keys:[],
+      spawn:{x:240,y:840}, exit:{x:1380,y:840, open:false}, guards:[]
+    };
+
+    if(level===1){
+      base.walls.push(
+        {x:420,y:300,w:240,h:80},
+        {x:980,y:260,w:260,h:90},
+        {x:520,y:650,w:320,h:90},
+        {x:1050,y:720,w:260,h:80}
+      );
+      base.keys = [{x:200,y:200,t:false},{x:1400,y:200,t:false},{x:1400,y:850,t:false}];
+      return base;
+    }
+    if(level===2){
+      base.walls.push(
+        {x:260,y:240,w:360,h:70},
+        {x:980,y:240,w:360,h:70},
+        {x:560,y:470,w:480,h:70},
+        {x:300,y:730,w:320,h:70},
+        {x:1100,y:730,w:260,h:70}
+      );
+      base.keys = [{x:180,y:160,t:false},{x:1420,y:160,t:false},{x:1420,y:850,t:false},{x:180,y:850,t:false}];
+      const g={x:800,y:170,r:18,a:Math.PI/2,pts:[{x:800,y:170},{x:1250,y:500},{x:350,y:500},{x:800,y:830}],idx:0,state:"patrol",timer:0};
+      applyGuardType(g,"GUARD",0.06);
+      base.guards=[g];
+      return base;
+    }
+    if(level===3){
+      base.walls.push(
+        {x:220,y:190,w:420,h:70},
+        {x:980,y:190,w:420,h:70},
+        {x:540,y:330,w:520,h:70},
+        {x:220,y:520,w:420,h:70},
+        {x:980,y:520,w:420,h:70},
+        {x:540,y:660,w:520,h:70}
+      );
+      base.keys = [{x:180,y:160,t:false},{x:1420,y:160,t:false},{x:800,y:850,t:false},{x:180,y:850,t:false},{x:1420,y:850,t:false}];
+      const g={x:800,y:170,r:18,a:0,pts:[{x:800,y:170},{x:1400,y:500},{x:800,y:830},{x:200,y:500}],idx:0,state:"patrol",timer:0};
+      applyGuardType(g,"WATCHER",0.12);
+      base.guards=[g];
+      return base;
+    }
+    if(level===4){
+      base.walls.push(
+        {x:320,y:240,w:260,h:90},{x:650,y:240,w:300,h:90},{x:1020,y:240,w:260,h:90},
+        {x:320,y:470,w:960,h:70},
+        {x:320,y:680,w:260,h:90},{x:650,y:680,w:300,h:90},{x:1020,y:680,w:260,h:90}
+      );
+      base.keys = [{x:180,y:160,t:false},{x:1420,y:160,t:false},{x:800,y:160,t:false},{x:180,y:850,t:false},{x:1420,y:850,t:false}];
+      const g1={x:450,y:500,r:18,a:0,pts:[{x:450,y:500},{x:450,y:820},{x:450,y:180}],idx:0,state:"patrol",timer:0};
+      const g2={x:1150,y:500,r:18,a:Math.PI,pts:[{x:1150,y:500},{x:1150,y:180},{x:1150,y:820}],idx:0,state:"patrol",timer:0};
+      applyGuardType(g1,"GUARD",0.18);
+      applyGuardType(g2,"RUNNER",0.18);
+      base.guards=[g1,g2];
+      return base;
+    }
+    if(level===5){
+      base.walls.push(
+        {x:220,y:180,w:1160,h:35},{x:220,y:300,w:1160,h:35},{x:220,y:420,w:1160,h:35},
+        {x:220,y:540,w:1160,h:35},{x:220,y:660,w:1160,h:35},{x:220,y:780,w:1160,h:35},
+        {x:460,y:215,w:35,h:565},{x:780,y:215,w:35,h:565},{x:1100,y:215,w:35,h:565}
+      );
+      base.keys=[{x:180,y:160,t:false},{x:1420,y:160,t:false},{x:180,y:850,t:false},{x:1420,y:850,t:false},{x:800,y:850,t:false},{x:800,y:160,t:false}];
+      const g={x:800,y:500,r:18,a:0,pts:[{x:800,y:500},{x:800,y:180},{x:800,y:820}],idx:0,state:"patrol",timer:0};
+      applyGuardType(g,"RUNNER",0.25);
+      base.guards=[g];
+      return base;
+    }
+    // level 6
+    base.walls.push(
+      {x:300,y:180,w:1000,h:60},{x:300,y:320,w:420,h:60},{x:880,y:320,w:420,h:60},
+      {x:520,y:460,w:560,h:60},{x:300,y:600,w:420,h:60},{x:880,y:600,w:420,h:60},{x:300,y:740,w:1000,h:60},
+      {x:760,y:240,w:60,h:520},{x:520,y:380,w:60,h:280},{x:1020,y:380,w:60,h:280}
+    );
+    base.keys=[{x:180,y:160,t:false},{x:1420,y:160,t:false},{x:800,y:160,t:false},{x:180,y:850,t:false},{x:1420,y:850,t:false},{x:800,y:850,t:false},{x:800,y:500,t:false}];
+    const g1={x:450,y:500,r:18,a:0,pts:[{x:450,y:200},{x:450,y:800},{x:800,y:500}],idx:0,state:"patrol",timer:0};
+    const g2={x:1150,y:500,r:18,a:Math.PI,pts:[{x:1150,y:800},{x:1150,y:200},{x:800,y:500}],idx:0,state:"patrol",timer:0};
+    applyGuardType(g1,"WATCHER",0.32);
+    applyGuardType(g2,"RUNNER",0.32);
+    base.guards=[g1,g2];
+    return base;
+  }
+
+  /* =========================
+     MODE + WORLD GETTERS
+  ========================= */
+  function getStoryWorld(level){
+    if(level<=6) return handcrafted(level);
+    if(level<=56) return openBlocky(level);
+    return roomsLevel(level);
+  }
+
+  let endlessSeed = 123456789;
+  function getEndlessWorld(endlessN){
+    const pseudo = 7 + Math.min(99, Math.floor(endlessN*1.15));
+    const salt = (endlessSeed ^ (endlessN*2654435761)) >>> 0;
+    if(endlessN % 2 === 1) return openBlocky(pseudo, salt);
+    return roomsLevel(pseudo, salt);
+  }
+
+  /* =========================
+     GAME STATE
+  ========================= */
+  let showMenu = true;
+  let dead = false;
+  let transitioning = false; // IMPORTANT: prevents multi-clear teleport
+
+  let mode = "STORY";
+  let storyLevel = 1;
+
+  let endlessN = 1;
+  let endlessScore = 0;
+
+  let world = getStoryWorld(1);
+
+  const player = {x:world.spawn.x,y:world.spawn.y,r:16, run:false, sneak:false};
+  const cam = {x:player.x,y:player.y, zoom:1};
+
+  let statusText="Menu";
+  let messageText="Press 1 for Story or E for Endless";
+
+  function prepWorld(){
+    player.x = world.spawn.x;
+    player.y = world.spawn.y;
+    cam.x = player.x;
+    cam.y = player.y;
+    spawnGrace = 0.6;
+    transitioning = false;
+  }
+
+  function startStory(level){
+    mode = "STORY";
+    storyLevel = clamp(level, 1, STORY_LEVELS);
+    world = getStoryWorld(storyLevel);
+    prepWorld();
+    dead=false;
+    messageText = `Story ${storyLevel}/${STORY_LEVELS} (${world.style})`;
+  }
+
+  function startEndless(reset=true){
+    mode = "ENDLESS";
+    if(reset){
+      endlessN = 1;
+      endlessScore = 0;
+      endlessSeed = (Math.random()*1e9)|0;
+    }
+    world = getEndlessWorld(endlessN);
+    prepWorld();
+    dead=false;
+    messageText = `Endless ${endlessN} (score ${endlessScore})`;
+  }
+
+  function restart(){
+    if(mode==="ENDLESS"){ world = getEndlessWorld(endlessN); prepWorld(); dead=false; }
+    else startStory(storyLevel);
+  }
+
+  function goNext(){
+    if(mode==="ENDLESS"){
+      endlessN++;
+      endlessScore++;
+      world = getEndlessWorld(endlessN);
+      prepWorld();
+      dead=false;
+      messageText = `Endless ${endlessN} (score ${endlessScore})`;
+    } else {
+      startStory(Math.min(STORY_LEVELS, storyLevel+1));
+    }
+  }
+
+  function goBack(){
+    if(mode==="ENDLESS"){
+      endlessN = Math.max(1, endlessN-1);
+      world = getEndlessWorld(endlessN);
+      prepWorld();
+      dead=false;
+      messageText = `Endless ${endlessN} (score ${endlessScore})`;
+    } else {
+      startStory(Math.max(1, storyLevel-1));
     }
   }
 
   function die(){
-    dead = true;
-    setMsg("Caught ❌  Press R to restart.");
-    statusEl.textContent = "CAUGHT";
+    dead=true;
+    messageText="Caught! Press R or G";
+    if(mode==="ENDLESS"){
+      save.endlessBest = Math.max(save.endlessBest, endlessN);
+      save.endlessBestScore = Math.max(save.endlessBestScore, endlessScore);
+      writeSave();
+    }
   }
 
-  function clearLevel(){
-    if(clearing) return;
-    clearing = true;
-    statusEl.textContent = "CLEARED";
-    setMsg("Level cleared ✅  Loading next…");
-    setTimeout(() => nextLevel(false), 450);
+  function openExitIfReady(){
+    const total=world.keys.length;
+    let got=0;
+    for(const k of world.keys) if(k.t) got++;
+    world.exit.open = (total>0 && got===total);
   }
 
-  // ---------------- Update / Draw ----------------
-  const KEY_PICKUP_RADIUS = 30;
+  function levelClear(){
+    if(transitioning) return;
+    transitioning = true;
 
+    if(mode==="STORY"){
+      save.highest = Math.max(save.highest, storyLevel+1);
+      writeSave();
+    }
+
+    messageText="Cleared ✅";
+    setTimeout(()=>goNext(), 220);
+  }
+
+  /* =========================
+     INPUT
+  ========================= */
+  const key = Object.create(null);
+
+  addEventListener("keydown",(e)=>{
+    const k = e.key.toLowerCase();
+    key[k]=true;
+
+    if(k==="g"){ showMenu=!showMenu; return; }
+
+    if(showMenu){
+      if(k==="1"){ startStory(1); showMenu=false; }
+      if(k==="c"){ startStory(Math.min(save.highest, STORY_LEVELS)); showMenu=false; }
+      if(k==="e"){ startEndless(true); showMenu=false; }
+      if(k==="k"){ nextSkin(); }
+      if(k==="x"){ localStorage.removeItem(SAVE_KEY); location.reload(); }
+      if(k==="enter"){ showMenu=false; }
+      return;
+    }
+
+    if(k==="r") restart();
+    if(k==="n") goNext();
+    if(k==="b") goBack();
+    if(k==="k") nextSkin();
+  });
+
+  addEventListener("keyup",(e)=>{ key[e.key.toLowerCase()]=false; });
+
+  btnMenu.onclick = ()=>{ showMenu=!showMenu; };
+  btnRestart.onclick = ()=>restart();
+  btnBack.onclick = ()=>{ if(!showMenu) goBack(); };
+  btnNext.onclick = ()=>{ if(!showMenu) goNext(); };
+
+  /* =========================
+     UPDATE
+  ========================= */
   function update(dt){
-    if(dead || clearing) return;
+    if(showMenu) return;
 
-    player.run = !!ks["shift"];
-    player.sneak = !!ks["control"];
+    spawnGrace = Math.max(0, spawnGrace - dt);
+    if(dead) return;
 
-    let sp = 190;
-    if(player.run) sp = 270;
-    if(player.sneak) sp = 120;
+    player.run = !!key["shift"];
+    player.sneak = !!key["control"];
 
-    let mx = (ks["d"]?1:0) - (ks["a"]?1:0);
-    let my = (ks["s"]?1:0) - (ks["w"]?1:0);
+    let sp = 200;
+    if(player.run) sp=285;
+    if(player.sneak) sp=125;
+
+    let mx=(key["d"]?1:0)-(key["a"]?1:0);
+    let my=(key["s"]?1:0)-(key["w"]?1:0);
 
     if(mx||my){
-      const m = Math.hypot(mx,my);
+      const m=Math.hypot(mx,my);
       mx/=m; my/=m;
       player.x += mx*sp*dt;
       player.y += my*sp*dt;
 
-      const np = {x:player.x, y:player.y};
+      const np={x:player.x,y:player.y};
       collideCircle(np, player.r);
       player.x=np.x; player.y=np.y;
     }
 
-    // keys
     for(const k of world.keys){
       if(k.t) continue;
-      if(dist(player.x,player.y, k.x,k.y) < KEY_PICKUP_RADIUS){
-        k.t = true;
-        player.keys++;
-        keysEl.textContent = String(player.keys);
+      if(dist(player.x,player.y, k.x,k.y) < 30) k.t=true;
+    }
+
+    openExitIfReady();
+
+    if(!transitioning && world.exit.open && dist(player.x,player.y, world.exit.x,world.exit.y) < 34){
+      levelClear();
+    }
+
+    let anyChase=false;
+    for(const g of world.guards){
+      stepGuard(g, dt);
+      if(g.state==="chase") anyChase=true;
+
+      if(spawnGrace<=0 && dist(g.x,g.y, player.x,player.y) < (g.r+player.r-4)){
+        die(); break;
       }
     }
-
-    // neighbors
-    let anyChase = false;
-    for(const n of world.neighbors){
-      stepNeighbor(n, dt);
-      if(n.state === "chase") anyChase = true;
-
-      if(dist(n.x,n.y, player.x,player.y) < (n.r + player.r - 4)){
-        die();
-        break;
-      }
-    }
-
-    if(!dead){
-      if(world.neighbors.length){
-        statusEl.textContent = anyChase ? "CHASE!" : "Hidden";
-      } else {
-        statusEl.textContent = "Explore";
-      }
-    }
-
-    if(player.keys === world.keys.length && world.keys.length > 0){
-      clearLevel();
-    }
+    statusText = anyChase ? "CHASE!" : "HIDDEN";
 
     cam.x = lerp(cam.x, player.x, 0.10);
     cam.y = lerp(cam.y, player.y, 0.10);
-    cam.zoom = lerp(cam.zoom, player.sneak ? 1.08 : 1.0, 0.08);
+    cam.zoom = lerp(cam.zoom, player.sneak ? 1.06 : 1.0, 0.08);
   }
 
-  function draw(){
-    const W = innerWidth, H = innerHeight;
-    ctx.fillStyle = "#0f172a";
+  /* =========================
+     DRAW
+  ========================= */
+  function drawWorld(){
+    const W=innerWidth,H=innerHeight;
+    ctx.fillStyle="#0b1020";
     ctx.fillRect(0,0,W,H);
 
     ctx.save();
@@ -556,70 +856,163 @@
     ctx.scale(cam.zoom, cam.zoom);
     ctx.translate(-cam.x, -cam.y);
 
-    ctx.fillStyle = "#1a2233";
+    ctx.fillStyle="#121a33";
     ctx.fillRect(0,0, world.W, world.H);
 
-    ctx.fillStyle = "#a7adb8";
+    ctx.fillStyle="#b4bccb";
     for(const w of world.walls) ctx.fillRect(w.x,w.y,w.w,w.h);
 
     for(const k of world.keys){
       if(k.t) continue;
       ctx.beginPath();
-      ctx.fillStyle = "#ffd400";
+      ctx.fillStyle="#ffd400";
       ctx.arc(k.x,k.y,10,0,Math.PI*2);
       ctx.fill();
-      ctx.strokeStyle = "#2b2400";
-      ctx.lineWidth = 3;
+      ctx.strokeStyle="rgba(0,0,0,.55)";
+      ctx.lineWidth=4;
       ctx.stroke();
     }
 
-    for(const n of world.neighbors){
+    ctx.beginPath();
+    ctx.fillStyle = world.exit.open ? "#a7ff7f" : "#3b435e";
+    ctx.arc(world.exit.x, world.exit.y, 16, 0, Math.PI*2);
+    ctx.fill();
+    ctx.strokeStyle="rgba(255,255,255,.22)";
+    ctx.lineWidth=3;
+    ctx.stroke();
+
+    ctx.fillStyle="rgba(255,255,255,.92)";
+    ctx.font="800 12px system-ui";
+    ctx.fillText(world.exit.open ? "EXIT" : "LOCKED", world.exit.x-22, world.exit.y-24);
+
+    for(const g of world.guards){
       ctx.save();
-      ctx.globalAlpha = 0.16;
-      ctx.fillStyle = "#ff2d2d";
+      ctx.globalAlpha=0.16;
+      ctx.fillStyle="#ff2d2d";
       ctx.beginPath();
-      ctx.moveTo(n.x,n.y);
-      ctx.arc(n.x,n.y, n.viewDist, n.a - n.fov/2, n.a + n.fov/2);
+      ctx.moveTo(g.x,g.y);
+      ctx.arc(g.x,g.y, g.viewDist, g.a - g.fov/2, g.a + g.fov/2);
       ctx.closePath();
       ctx.fill();
       ctx.restore();
 
       ctx.beginPath();
-      ctx.fillStyle = "#ff3b3b";
-      ctx.arc(n.x,n.y, n.r, 0, Math.PI*2);
+      ctx.fillStyle=g.color;
+      ctx.arc(g.x,g.y,g.r,0,Math.PI*2);
       ctx.fill();
-      ctx.strokeStyle = "#300000";
-      ctx.lineWidth = 4;
+      ctx.strokeStyle="rgba(0,0,0,.55)";
+      ctx.lineWidth=4;
       ctx.stroke();
+
+      ctx.fillStyle="rgba(255,255,255,.95)";
+      ctx.font="900 12px system-ui";
+      ctx.fillText(g.type, g.x-28, g.y-26);
     }
 
     ctx.beginPath();
-    ctx.fillStyle = player.sneak ? "#7fd1ff" : (player.run ? "#a7ff7f" : "#ffffff");
+    ctx.fillStyle = currentSkin().color;
     ctx.arc(player.x,player.y, player.r, 0, Math.PI*2);
     ctx.fill();
-    ctx.strokeStyle = "#0b0f16";
-    ctx.lineWidth = 4;
+    ctx.strokeStyle="rgba(0,0,0,.6)";
+    ctx.lineWidth=4;
     ctx.stroke();
+
+    ctx.restore();
+
+    if(!showMenu && !dead && spawnGrace>0){
+      ctx.save();
+      ctx.fillStyle="rgba(255,255,255,.7)";
+      ctx.font="900 14px system-ui";
+      ctx.fillText("Spawn shield", 16, innerHeight-18);
+      ctx.restore();
+    }
+  }
+
+  function drawMenu(){
+    const W=innerWidth,H=innerHeight;
+    ctx.save();
+    ctx.globalAlpha=0.88;
+    ctx.fillStyle="#000";
+    ctx.fillRect(0,0,W,H);
+    ctx.globalAlpha=1;
+
+    ctx.fillStyle="#fff";
+    ctx.font="900 46px system-ui";
+    ctx.fillText("SNEAKY NEIGHBOR", 60, 110);
+
+    ctx.font="18px system-ui";
+    ctx.fillStyle="rgba(255,255,255,.92)";
+    ctx.fillText("1 = New Story (106)   C = Continue Story   E = Endless Mode   G = Toggle Menu", 60, 170);
+    ctx.fillText("WASD move • Shift run • Ctrl sneak • R restart • N next • B back • K skins", 60, 200);
+    ctx.fillText("X = Reset save", 60, 230);
+
+    ctx.fillStyle="rgba(255,255,255,.85)";
+    ctx.fillText(`Story progress: highest unlocked = ${Math.min(save.highest, STORY_LEVELS)}/${STORY_LEVELS}`, 60, 280);
+    ctx.fillText(`Endless best: level ${save.endlessBest} • best score ${save.endlessBestScore}`, 60, 310);
+    ctx.fillText(`Skin: ${currentSkin().name} (press K)`, 60, 340);
+
+    ctx.fillStyle="rgba(255,255,255,.78)";
+    ctx.fillText("Story styles: 1–6 handmade • 7–56 open/blocky • 57–106 rooms w/ wide corridors", 60, 390);
 
     ctx.restore();
   }
 
-  // ---------------- Loop ----------------
-  let last = performance.now();
-  function loop(now){
-    const dt = Math.min(0.03, (now-last)/1000);
-    last = now;
-    update(dt);
-    draw();
-    requestAnimationFrame(loop);
+  function updateHUD(){
+    const totalKeys = world.keys.length;
+    const gotKeys = world.keys.reduce((a,k)=>a+(k.t?1:0),0);
+    const modeLabel = (mode==="ENDLESS")
+      ? `ENDLESS ${endlessN} (score ${endlessScore})`
+      : `STORY ${storyLevel}/${STORY_LEVELS}`;
+
+    hud.innerHTML = `
+      <div class="row">
+        <span class="tag"><b>${modeLabel}</b></span>
+        <span class="tag"><b>Style:</b> ${world.style}</span>
+        <span class="tag"><b>Status:</b> ${dead ? "CAUGHT" : statusText}</span>
+        <span class="tag"><b>Keys:</b> ${gotKeys}/${totalKeys}</span>
+        <span class="tag"><b>Exit:</b> ${world.exit.open ? "OPEN" : "LOCKED"}</span>
+        <span class="tag"><b>Skin:</b> ${currentSkin().name}</span>
+      </div>
+      <div class="small">${messageText || ""}</div>
+      <div class="small">G menu • WASD • Shift • Ctrl • R • N • B • K skins</div>
+    `;
   }
 
-  // start
-  loadLevel(1);
+  /* =========================
+     BOOT
+  ========================= */
+  loadSave();
+  currentSkin();
+
+  startStory(1);
+  showMenu = true;
+
+  let last=performance.now();
+  function loop(ts){
+    const dt = Math.min(0.03, (ts-last)/1000);
+    last=ts;
+
+    update(dt);
+    drawWorld();
+    if(showMenu) drawMenu();
+
+    if(dead){
+      ctx.save();
+      ctx.fillStyle="rgba(0,0,0,0.55)";
+      ctx.fillRect(0,0,innerWidth,innerHeight);
+      ctx.fillStyle="#fff";
+      ctx.font="900 40px system-ui";
+      ctx.fillText("CAUGHT!", 60, 120);
+      ctx.font="18px system-ui";
+      ctx.fillText("Press R to restart or G for menu.", 60, 160);
+      ctx.restore();
+    }
+
+    updateHUD();
+    requestAnimationFrame(loop);
+  }
   requestAnimationFrame(loop);
 })();
 </script>
 </body>
 </html>
-
-
